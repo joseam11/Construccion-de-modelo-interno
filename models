@@ -1,0 +1,307 @@
+#----------------------------------------------NO VIDA--------------------------------------------------
+
+datos <- read.csv("C:/Users/carro/Downloads/frecuencias.csv", header = FALSE, sep = ",")
+frec<-as.numeric(datos[,1])
+
+#----------------------------------------------Poisson--------------------------------------------------
+
+#Momentos
+lambda<-mean(frec)
+print(lambda)
+
+#-------------------------------------------------------------------------------------------------------
+
+datos <- read.csv("C:/Users/carro/Downloads/severidades.csv", header = FALSE, sep = ",")
+sev<-as.numeric(datos[,1])
+
+#----------------------------------------------WEIBULL--------------------------------------------------
+
+#Método de los momentos
+
+Momentos<-function(param){
+  o1<-(param[2]*gamma(1+(1/param[1]))-mean(sev))^2
+  o2<-((param[2]^2)*(gamma(1+(2/param[1]))-(gamma(1+(1/param[1])))^2)-var(sev))^2
+  return(o1+o2)
+}
+MM<-optim(c(1,500),Momentos,method="L-BFGS-B",lower=c(0.1,0.1),upper=c(100,5000))
+MM$par
+
+#Método de percentile matching
+
+Percentile_matching<-function(param){
+  n1<-(qweibull(0.1,param[1],param[2])-quantile(sev,0.1))^2
+  n2<-(qweibull(0.5,param[1],param[2])-quantile(sev,0.5))^2
+  n3<-(qweibull(0.9,param[1],param[2])-quantile(sev,0.9))^2
+  return(n1+n2+n3)
+}
+MP<-optim(c(1,500),Percentile_matching,method="L-BFGS-B",lower=c(0.1,0.1),upper=c(100,5000))
+MP$par
+
+#Método maximum-likelyhood
+
+likelyhood<-function(param){
+  dif<-sum(dweibull(sev,param[1],param[2],log=TRUE))
+  return(-dif)
+}
+ML<-optim(c(1,500),likelyhood,method="L-BFGS-B",lower=c(0.1,0.1),upper=c(100,5000))
+ML$par
+
+#--------------------------------------------Función de Distribución CVM-----------------------------------------
+
+#----------------------------------------Función de Distribución CVM Momentos-------------------------------------
+
+library("goftest")
+
+cvm_momentos<-c()
+for (i in 1:5000){
+  cvm<-cvm.test(sev,"pweibull",MM$par[1],MM$par[2],estimated=TRUE)
+  cvm_momentos[i]<-cvm$p.value
+}
+hist(cvm_momentos)
+mean(cvm_momentos)
+
+#---------------------------------------Función de Distribución CVM likelyhood----------------------------------------
+
+cvm_likelyhood<-c()
+for (i in 1:5000){
+  cvm<-cvm.test(sev,"pweibull",ML$par[1],ML$par[2],estimated=TRUE)
+  cvm_likelyhood[i]<-cvm$p.value
+}
+hist(cvm_likelyhood)
+mean(cvm_likelyhood)
+
+#------------------------------Función de Distribución CMV bajo H0 percentile_matching)-------------------------------
+
+cvm_percentile<-c()
+for (i in 1:5000){
+  cvm<-cvm.test(sev,"pweibull",MP$par[1],MP$par[2],estimated=TRUE)
+  cvm_percentile[i]<-cvm$p.value
+}
+hist(cvm_percentile)
+mean(cvm_percentile)
+
+#-----------------------------------------------------MSE-------------------------------------------------------------
+
+#---------------------------------------------Bootstrap Momentos------------------------------------------------------
+
+Boot_MM1<-c()
+Boot_MM2<-c()
+for(i in 1:5000){
+  muestra_boot<-sample(sev,length(sev),replace=TRUE)
+  Momentos<-function(param){
+    o1<-(param[2]*gamma(1+(1/param[1]))-mean(muestra_boot))^2
+    o2<-((param[2]^2)*(gamma(1+(2/param[1]))-(gamma(1+(1/param[1])))^2)-var(muestra_boot))^2
+    return(o1+o2)
+  }
+  MM<-optim(c(1,500),Momentos,method="L-BFGS-B",lower=c(0.1,0.1),upper=c(100,5000))
+  Boot_MM1[i]<-MM$par[1]
+  Boot_MM2[i]<-MM$par[2]
+}
+sd_MM<-c(sd(Boot_MM1),sd(Boot_MM2))
+print(sd_MM)
+
+#Intervalo confianza 95% parametros de Momentos
+
+Intervalo_Momentos_p1<-c(quantile(Boot_MM1,0.025),quantile(Boot_MM1,0.975))
+Intervalo_Momentos_p2<-c(quantile(Boot_MM2,0.025),quantile(Boot_MM2,0.975))
+print(Intervalo_Momentos_p1)
+print(Intervalo_Momentos_p2)
+
+#--------------------------------------------Bootstrap likelyhood----------------------------------------------------
+
+Boot_ML1<-c()
+Boot_ML2<-c()
+for(i in 1:5000){
+muestra_boot<-sample(sev,length(sev),replace=TRUE)
+Likelyhood<-function(param){
+  dif<-sum(dweibull(muestra_boot,param[1],param[2],log=TRUE))
+  return(-dif)
+}
+ML<-optim(c(1,500),Likelyhood,method="L-BFGS-B",lower=c(0.1,0.1),upper=c(100,5000))
+Boot_ML1[i]<-ML$par[1]
+Boot_ML2[i]<-ML$par[2]
+}
+sd_ML<-c(sd(Boot_ML1),sd(Boot_ML2))
+print(sd_ML)
+
+#Intervalo confianza 95% parametros de likelyhood
+
+Intervalo_likelyhood_p1<-c(quantile(Boot_ML1,0.025),quantile(Boot_ML1,0.975))
+Intervalo_likelyhood_p2<-c(quantile(Boot_ML2,0.025),quantile(Boot_ML2,0.975))
+print(Intervalo_likelyhood_p1)
+print(Intervalo_likelyhood_p2)
+
+#----------------------------------------Bootstrap percentile matching-----------------------------------------------
+
+Boot_MP1<-c()
+Boot_MP2<-c()
+for(i in 1:5000){
+  muestra_boot<-sample(sev,length(sev),replace=TRUE)
+  percentile_matching<-function(param){
+    s1<-(qweibull(0.1,param[1],param[2])-quantile(muestra_boot,0.1))^2
+    s2<-(qweibull(0.5,param[1],param[2])-quantile(muestra_boot,0.5))^2
+    s3<-(qweibull(0.9,param[1],param[2])-quantile(muestra_boot,0.9))^2
+    return(s1+s2+s3)
+  }
+MP<-optim(c(1,500),percentile_matching,method="L-BFGS-B",lower=c(0.1,0.1),upper=c(100,5000))
+Boot_MP1[i]<-MP$par[1]
+Boot_MP2[i]<-MP$par[2]
+}
+sd_MP<-c(sd(Boot_MP1),sd(Boot_MP2))
+print(sd_MP)
+
+#Intervalo confianza 95% parametros de percentile
+
+Intervalo_percentile_p1<-c(quantile(Boot_MP1,0.025),quantile(Boot_MP1,0.975))
+Intervalo_percentile_p2<-c(quantile(Boot_MP2,0.025),quantile(Boot_MP2,0.975))
+print(Intervalo_percentile_p1)
+print(Intervalo_percentile_p2)
+
+#---------------------------------------------MODELOS AGREGADOS----------------------------------------------------
+
+#Modelo No vida con parametros sin estresar.
+
+cartera<-c()
+for (sim in 1:5000){
+  poliza<-c()
+  for (i in 1:25412){
+    frecuencia<-rpois(1,mean(frec)) 
+    severidad<-rweibull(frecuencia,ML$par[1],ML$par[2])
+    poliza[i]<-sum(severidad)
+  }
+  cartera[sim]<-sum(poliza)
+}
+hist(poliza)
+hist(cartera)
+
+best_estimate<-mean(cartera)
+print(best_estimate)
+worst_case<-quantile(cartera,0.995)
+print(worst_case)
+Economic_capital<-worst_case-best_estimate
+print(Economic_capital)
+
+Tvar_MN<-mean(cartera[cartera>worst_case])
+print(Tvar_MN)
+
+#Modelo No vida con parametros estresados VAR(99.5%).
+
+ML1_995<-quantile(Boot_ML1,0.995)
+ML2_995<-quantile(Boot_ML2,0.995)
+
+cartera_estresada<-c()
+for (sim in 1:5000){
+  poliza_estresada<-c()
+  for (i in 1:25412){
+    frecuencia<-rpois(1,mean(frec)) 
+    severidad<-rweibull(frecuencia,ML1_995,ML2_995)
+    poliza_estresada[i]<-sum(severidad)
+  }
+  cartera_estresada[sim]<-sum(poliza_estresada)
+}
+hist(poliza_estresada)
+hist(cartera_estresada)
+
+best_estimate<-mean(cartera_estresada)
+print(best_estimate)
+worst_case<-quantile(cartera_estresada,0.995)
+print(worst_case)
+Economic_capital<-worst_case-best_estimate
+print(Economic_capital)
+
+Tvar_MNE<-mean(cartera_estresada[cartera_estresada>worst_case])
+print(Tvar_MNE)
+#-----------------------------------------------------VIDA---------------------------------------------------------
+
+library(readxl)
+mortalidad <- read_excel("C:/Users/carro/Downloads/Mortalidad (2).xlsx")
+
+R<-10000
+suma_asegurada<-850000
+escenarios_vida<-c()
+for(i in 1:R){
+  fallecidos<-rbinom(n=mortalidad$Edad, size=mortalidad$ni, prob=mortalidad$qx)
+  pagos<-fallecidos*suma_asegurada
+  escenarios_vida[i]<-sum(pagos)
+}
+hist(escenarios_vida)
+
+best_estimate<-mean(escenarios_vida)
+print(best_estimate)
+worst_case<-quantile(escenarios_vida,0.995)
+print(worst_case)
+Economic_capital<-worst_case-best_estimate
+print(Economic_capital)
+
+Tvar_V<-mean(escenarios_vida[escenarios_vida>worst_case])
+print(Tvar_V)
+#-------------------------------------------MODELO AGREGADO FINAL SIN REASEGURO------------------------------------------------
+
+vector_todo<-c()
+for(j in 1:5000){
+  poliza_estresada<-c()
+for (i in 1:25412){
+  frecuencia<-rpois(1,mean(frec)) 
+  severidad<-rweibull(frecuencia,ML1_995,ML2_995)
+  poliza_estresada[i]<-sum(severidad)
+}
+  cartera_estresada<-sum(poliza_estresada)
+
+suma_asegurada<-850000
+escenarios_vida<-c()
+  fallecidos<-rbinom(n=mortalidad$Edad, size=mortalidad$ni, prob=mortalidad$qx)
+  pagos<-fallecidos*suma_asegurada
+  escenarios_vida<-sum(pagos)
+
+vector_todo[j]<-escenarios_vida+cartera_estresada
+}
+hist(vector_todo)
+
+best_estimate<-mean(vector_todo)
+print(best_estimate)
+worst_case<-quantile(vector_todo,0.995)
+print(worst_case)
+Economic_capital<-worst_case-best_estimate
+print(Economic_capital)
+
+Tvar_AFS<-mean(vector_todo[vector_todo>worst_case])
+print(Tvar_AFS)
+#--------------------------------------------MODELO AGREGADO FINAL CON REASEGURO--------------------------------------
+
+R<-10000
+suma_asegurada<-850000
+agregado<-c()
+for(i in 1:R){
+  fallecidos<-rbinom(n=mortalidad$Edad, size=mortalidad$ni, prob=mortalidad$qx)
+  pagos<-fallecidos*suma_asegurada
+  agregado[i]<-sum(pagos)+1850000
+}
+hist(agregado)
+
+best_estimate<-mean(agregado)
+print(best_estimate)
+worst_case<-quantile(agregado,0.995)
+print(worst_case)
+Economic_capital<-worst_case-best_estimate
+print(Economic_capital)
+
+Tvar_AFR<-mean(agregado[agregado>worst_case])
+print(Tvar_AFR)
+
+#tablas
+# Crear los datos
+metodos <- c("Percentil", "Likelihood", "Momentos")
+limite_inferior <- c(1.223014, 1.252629, 0.862564)
+limite_superior <- c(1.426506, 1.379720, 1.014663)
+
+# Crear el data frame
+tabla_intervalos <- data.frame(
+  Metodo = metodos,
+  Limite_Inferior = limite_inferior,
+  Limite_Superior = limite_superior
+)
+
+# Mostrar la tabla
+print(tabla_intervalos)
+library(knitr)
+kable(tabla_intervalos, format = "markdown", caption = "Comparación de Intervalos de Confianza")
