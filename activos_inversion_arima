@@ -1,0 +1,1587 @@
+library(shiny)
+library(tidyquant)
+library(dplyr)
+library(tidyr)
+library(fpp2)
+library(matrixStats)
+library(tseries)
+#install.packages("corrplot")
+library(corrplot)
+library(zoo) 
+library(ggplot2)
+library(goftest)
+library(shiny)
+library(shinydashboard)
+library(plotly)
+library(DT)
+
+# Cargamos
+symbols <- c(
+  "NTOA.BE",       #nintendo
+  "ALV.DE",      # aseguradora allianz
+  "PLTR",        # Palantir IA OTAN
+  "UNH",       # farmaceitica EEUU
+  "IDCBY"       # Industrial and Commercial Bank of China Limited
+)
+
+# Obtener los datos históricos (últimos 5 años)
+data_list <- lapply(symbols, function(sym) {
+  tq_get(sym, from = Sys.Date() - 5*365, to = Sys.Date())
+})
+
+# Asignar nombres a los dataframes de cada activo
+names(data_list) <- c(
+  "NTOA.BE" , "ALVDE","PLTR", "UNH","IDCBY"
+)
+
+
+# Combinar datos en formato largo
+combined_data <- bind_rows(
+  lapply(names(data_list), function(sym) {
+    data_list[[sym]] %>% 
+      select(date, adjusted) %>% 
+      mutate(symbol = sym)
+  })
+)
+
+
+
+
+symbols <- c("NTOA.BE", "ALV.DE",  "PLTR", "UNH", "IDCBY")
+data <- tq_get(symbols, from = Sys.Date() - 5*365, to = Sys.Date()) 
+
+# Calculamos rendimientos logarítmicos diarios
+returns <- data %>%
+  group_by(symbol) %>%
+  tq_transmute(select = adjusted, mutate_fun = periodReturn, 
+               period = "daily", type = "log", col_rename = "return") %>%
+  pivot_wider(names_from = symbol, values_from = return) %>%
+  na.omit() 
+
+# CONSTRUIR MATRICES DE CORRELACIONES
+cor_matrix <- round(cor(returns[, -1]), 2)
+print(cor_matrix)
+
+# HEATMAP
+#
+corrplot(cor_matrix, method = "color", type = "upper", 
+         tl.col = "black", addCoef.col = "black", 
+         title = "Correlaciones entre activos (rendimientos diarios)")
+
+autoplot(ts(data_list$NTOA.BE$close))
+autoplot(ts(data_list$ALVDE$close))
+autoplot(ts(data_list$PLTR$close))
+autoplot(ts(data_list$UNH$close))
+autoplot(ts(data_list$IDCBY$close))
+
+
+NTOA <- data_list$NTOA.BE$close
+ALVDE <- data_list$ALVDE$close
+UNH <- data_list$UNH$close
+IDCBY <- data_list$IDCBY$close
+PLTR<-data_list$PLTR$close
+
+
+
+
+#ALVDE
+
+  #FASE 1.1 VERIFICAR ESTACIONARIEDAD EN MEDIA
+
+ggAcf(ALVDE)
+
+#Dickey-Fuller
+adftest_ALVDE<-adf.test(ALVDE) #HO->No Estacionariedad
+#KPSS
+kpss_ALVDE<-kpss.test(ALVDE,null = "Level") #HO-> Estacionariedad
+#PP
+pp_ALVDE<-pp.test(ALVDE) #H0->No Estacionariedad
+
+          #ANALIZAMOS ESTACIONARIEDAD EN VARIANZA
+particion_ALVDE <- length(ALVDE)/2
+ALVDE1 <- ALVDE[1:particion_ALVDE]
+ALVDE2 <- ALVDE[(particion_ALVDE+ 1):length(ALVDE)]
+
+var1_ALVDE<-var(ALVDE1)
+var2_ALVDE<-var(ALVDE2)
+
+RatioF_ALVDE<- max(var1_ALVDE, var2_ALVDE)/min(var1_ALVDE, var2_ALVDE)
+
+df1_ALVDE1 <- length(ALVDE1) - 1
+df2_ALVDE2 <- length(ALVDE2) - 1
+p_value_VARI_ALVDE <- 1 - pf(RatioF_ALVDE, df1_ALVDE1, df2_ALVDE2)  #EL PROCESO ESTOCÁSTICO NO ES ESTACIONARIO EN VARIANZA
+
+#REALIZAMOS LAS CORRECCIONES
+ALVDE_corr<- diff(log(ALVDE))
+
+#Dickey-Fuller
+adftest_ALVDE_diff1<-adf.test(ALVDE_corr) #HO->No Estacionariedad
+#KPSS
+kpss_ALVDE_diff1<-kpss.test(ALVDE_corr,null = "Level") #HO-> Estacionariedad
+#PP
+pp_ALVDE_diff1<-pp.test(ALVDE_corr) #H0->No Estacionariedad
+
+        #SE TOMA 1 DIFERENCIA PARA HACER ESTACIONARIA EN MEDIA
+
+#FASE 1.2 ENCONTRAR EL ORDEN AR Y MA
+
+ggAcf(ALVDE_corr)
+ggPacf(ALVDE_corr)
+
+
+fitALVDE_1 <- Arima(log(ALVDE), c(2,1,1))
+fitALVDE_2 <- Arima(log(ALVDE), c(2,1,0))
+fitALVDE_3 <- Arima(log(ALVDE), c(1,1,2))
+fitALVDE_4 <- Arima(log(ALVDE), c(1,1,1))
+fitALVDE_5 <- Arima(log(ALVDE), c(1,1,0), method="ML")
+fitALVDE_6 <- Arima(log(ALVDE), c(1,1,3))
+fitALVDE_7 <- Arima(log(ALVDE), c(2,1,2), method="ML")
+fitALVDE_8 <- Arima(log(ALVDE), c(2,1,3))
+fitALVDE_9 <- Arima(log(ALVDE), c(3,1,1))
+fitALVDE_10 <- Arima(log(ALVDE), c(2,1,4))
+
+
+
+#MENOR BIC
+min(fitALVDE_1$bic, fitALVDE_2$bic, fitALVDE_3$bic, fitALVDE_4$bic, fitALVDE_5$bic, 
+    fitALVDE_5$bic, fitALVDE_6$bic, fitALVDE_7$bic, fitALVDE_8$bic, fitALVDE_9$bic, fitALVDE_10$bic)
+
+bics <- c(fitALVDE_1$bic, fitALVDE_2$bic, fitALVDE_3$bic, fitALVDE_4$bic, fitALVDE_5$bic, 
+          fitALVDE_5$bic, fitALVDE_6$bic, fitALVDE_7$bic, fitALVDE_8$bic, fitALVDE_9$bic, fitALVDE_10$bic)
+
+ALVDE_bic <- which.min(bics)
+ALVDE_bic
+
+#calculamos el menor AIC
+min(fitALVDE_1$aic, fitALVDE_2$aic, fitALVDE_3$aic, fitALVDE_4$aic, fitALVDE_5$aic, 
+    fitALVDE_6$aic, fitALVDE_7$aic, fitALVDE_8$aic, fitALVDE_9$aic)
+
+aics <- c(fitALVDE_1$aic, fitALVDE_2$aic, fitALVDE_3$aic, fitALVDE_4$aic, fitALVDE_5$aic, 
+          fitALVDE_6$aic, fitALVDE_7$aic, fitALVDE_8$aic, fitALVDE_9$aic,fitALVDE_10$aic)
+
+ALVDE_aic <- which.min(aics)
+ALVDE_aic
+
+#calculamos el menor AIC corregido
+min(fitALVDE_1$aicc, fitALVDE_2$aicc, fitALVDE_3$aicc, fitALVDE_4$aicc, fitALVDE_5$aicc, 
+    fitALVDE_6$aicc, fitALVDE_7$aicc, fitALVDE_8$aicc, fitALVDE_9$aicc,fitALVDE_10$aicc)
+
+aiccs <- c(fitALVDE_1$aicc, fitALVDE_2$aicc, fitALVDE_3$aicc, fitALVDE_4$aicc, fitALVDE_5$aicc, 
+           fitALVDE_6$aicc, fitALVDE_7$aicc, fitALVDE_8$aicc, fitALVDE_9$aicc,fitALVDE_10$aicc)
+
+
+ALVDE_aicc <- which.min(aiccs)
+ALVDE_aicc
+
+#ESTIMACIÓN DE PARÁMETROS. CON MODELO 5 y 7
+
+    #MODELO 5
+coefis1_ALVDE<-fitALVDE_5$coef
+se1ALVDE <- sqrt(diag(fitALVDE_5$var.coef))
+testT1_ALVDE<- coefis1_ALVDE/se1ALVDE
+
+interT1_ALVDE<- c()
+for (i in 1:length(testT1_ALVDE)) {
+  if (abs(testT1_ALVDE[i])>1.96) {
+    interT1_ALVDE[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT1_ALVDE[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT1_ALVDE)<-c("ar1")
+interT1_ALVDE  
+  
+    #MODELO 7
+coefis2_ALVDE<-fitALVDE_7$coef
+se2ALVDE <- sqrt(diag(fitALVDE_7$var.coef))
+testT2_ALVDE<- coefis2_ALVDE/se2ALVDE
+
+interT2_ALVDE<- c()
+for (i in 1:length(testT2_ALVDE)) {
+  if (abs(testT2_ALVDE[i])>1.96) {
+    interT2_ALVDE[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT2_ALVDE[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT2_ALVDE)<-c("ar1","ar2","ma1","ma2")
+interT2_ALVDE   
+
+#DESECHAMOS EL PROCESO ESTOCÁSTICO ARIMA(1,1,0) POR TENER COEFICIENTE NS Y TOMAMOS EL ARIMA(2,1,2)
+
+#DIAGNÓSIS
+checkresiduals(fitALVDE_7)  #PREELIMINAR
+res_ALVDE_7 <- residuals(fitALVDE_7)
+
+#CORRELACIÓN DE LOS RESIDUOS
+
+Box.test(res_ALVDE_7 , lag = sqrt(length(res_ALVDE_7)), type = c("Ljung-Box")) #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR INCORRELACIÓN RESIDUOS
+
+#NORMALIDAD DE LOS RESIDUOS
+
+cvm.test(res_ALVDE_7,"pnorm",0,sd(res_ALVDE_7),estimated = TRUE)
+ad.test(res_ALVDE_7,"pnorm",0,sd(res_ALVDE_7),estimated = TRUE)
+jarque.bera.test(res_ALVDE_7) #EN CVM Y AD NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR LA NORMALIDAD DE LOS RESIDUOS. JARQUE-BERA DA PROBLEMAS (SABEMOS QUE ESTE TEST TIENE PROBLEMAS)
+
+#MEDIA 0
+qnorm(c(0.025,0.975),0,sd(res_ALVDE_7)/sqrt(length(res_ALVDE_7)))
+mean(res_ALVDE_7)  #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR QUE LA MEDIA DE LOS RESIDUOS SEA 0
+
+#HOMOCEDASTICIDAD
+
+y_ALVDE <- res_ALVDE_7^2  
+
+fitted_valsALVDE <- fitted(fitALVDE_7)
+
+df_ALVDE <- data.frame(
+  y_ALVDE = y_ALVDE,
+  fitted_valsALVDE = fitted_valsALVDE
+)
+
+df_ALVDE<- df_ALVDE[complete.cases(df_ALVDE), ]
+
+
+fitaux_ALVDE<-lm(y_ALVDE ~fitted_valsALVDE)
+dfreedom_ALVDE<-4
+bp.statistic_ALVDE<-(length(y_ALVDE)-dfreedom_ALVDE)*summary(fitaux_ALVDE)$r.squared
+bp.pvalue_ALVDE<-1-pchisq(bp.statistic_ALVDE,dfreedom_ALVDE)
+
+
+
+#EL PROCESO HA SUPERADO LA FASE DE DIAGNÓSIS Y PUEDE SER USADO PARA PREDECIR
+
+
+fit_ALVDE <- Arima(log(ALVDE), c(2,1,2))
+res_ALVDE <- residuals(fit_ALVDE)
+
+predict_arima_bootstrap <- function(model, residuals, original_series, n_bootstrap = 1000, h = 3) {
+  # Extraer coeficientes AR y MA
+  phi <- coef(model)[grep("^ar", names(coef(model)))]
+  theta <- coef(model)[grep("^ma", names(coef(model)))]
+  
+  p <- length(phi)
+  q <- length(theta)
+  
+  log_y <- log(original_series)
+  T <- length(log_y)
+  
+  # Calcular diferencias
+  dy_init <- diff(log_y)
+  
+  # Matriz para almacenar simulaciones
+  boots <- matrix(NA, nrow = n_bootstrap, ncol = h)
+  
+  for (i in 1:n_bootstrap) {
+    # Residuos bootstrap con relleno al inicio
+    eps_star <- c(rep(0, q), sample(residuals, size = h, replace = TRUE))  # longitud = q + h
+    
+    # Inicializar diferencia con relleno
+    dy_star <- c(tail(dy_init, p), rep(NA, h))  # longitud = p + h
+    
+    # Simular diferencias futuras
+    for (t in 1:h) {
+      ar_part <- if (p > 0) sum(phi * rev(dy_star[(t):(t + p - 1)])) else 0
+      ma_part <- if (q > 0) sum(theta * rev(eps_star[(t):(t + q - 1)])) else 0
+      
+      dy_star[p + t] <- ar_part + eps_star[q + t] + ma_part
+    }
+    
+    # Reconstruir serie log desde el último valor
+    last_log <- log_y[T]
+    future_log <- cumsum(dy_star[(p + 1):(p + h)]) + last_log
+    
+    # Convertir a escala original
+    boots[i, ] <- exp(future_log)
+  }
+  
+  # Eliminar simulaciones erróneas
+  boots <- boots[complete.cases(boots), ]
+  
+  # Calcular resumen estadístico
+  pred_mean <- colMeans(boots)
+  pred_median <- apply(boots, 2, median)
+  pred_lower <- apply(boots, 2, quantile, probs = 0.025)
+  pred_upper <- apply(boots, 2, quantile, probs = 0.975)
+  
+  list(
+    mean = pred_mean,
+    median = pred_median,
+    lower = pred_lower,
+    upper = pred_upper,
+    simulations = boots
+  )
+}
+pred_boot_ALVDE <- predict_arima_bootstrap(
+  model = fit_ALVDE,
+  residuals = res_ALVDE,
+  original_series = ALVDE,
+  n_bootstrap = 1000,
+  h = 3
+)
+
+print(pred_boot_ALVDE$mean)
+
+
+
+last_values_original <- tail(ALVDE, 12)
+time_points <- c(seq(-11, 0), 1:3)
+
+plot_data_original <- data.frame(
+  Time = time_points,
+  Value = c(last_values_original, pred_boot_ALVDE$mean),
+  Type = c(rep("Observado", 12), rep("Predicción", 3)),
+  Lower = c(rep(NA, 12), pred_boot_ALVDE$lower),
+  Upper = c(rep(NA, 12), pred_boot_ALVDE$upper)
+)
+
+ggplot(plot_data_original, aes(x = Time, y = Value, color = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Observado"), 
+            linewidth = 0.8, alpha = 0.8) +
+  geom_point(size = 3, aes(shape = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Predicción"), 
+            linewidth = 1, linetype = "dashed") +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), 
+              fill = "steelblue", alpha = 0.2) +
+  geom_point(data = subset(plot_data_original, Type == "Predicción"), 
+             size = 4, shape = 18) +
+  labs(title = "Predicción a 3 pasos - ARIMA(5,1,4) para ALVDE",
+       subtitle = "Intervalos predictivos al 95% obtenidos por bootstrap",
+       x = "Pasos Temporales",
+       y = "Valor de ALVDE",
+       color = "",
+       shape = "") +
+  scale_x_continuous(breaks = time_points,
+                     labels = c(paste0("t-", 11:1), "t", "t+1", "t+2", "t+3")) +
+  scale_color_manual(values = c("Observado" = "darkblue", "Predicción" = "red")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+#POINTFORECAST 
+point_forecast_ALVDE_1<-pred_boot_ALVDE$mean[1]
+point_forecast_ALVDE_2<-pred_boot_ALVDE$mean[2]
+point_forecast_ALVDE_3<-pred_boot_ALVDE$mean[3]
+
+
+#INTERVALFORECAST MORTALIDAD
+
+pred_boot_ALVDE_nl<- unlist(pred_boot_ALVDE)
+interval_ALVDE<-quantile(pred_boot_ALVDE_nl,c(0.025,0.975))
+
+
+#DENSITY FORECAST MORTALIDAD
+density_ALVDE<- density(pred_boot_ALVDE_nl)
+plot(density_ALVDE)
+
+
+#VaR
+VaR_ALVDE<- quantile(pred_boot_ALVDE_nl,0.01)
+VaR_ALVDE
+
+#TvAR coste
+TvAR_ALVDE<- mean(pred_boot_ALVDE_nl[pred_boot_ALVDE_nl<VaR_ALVDE])
+TvAR_ALVDE
+
+#ECONOMIC CAPITAL
+
+economic_capital_ALVDE<-  mean(pred_boot_ALVDE_nl)-VaR_ALVDE 
+economic_capital_ALVDE
+
+
+
+
+#NINTENDO
+ggAcf(NTOA)
+
+#Dickey-Fuller
+adftest_NTOA<-adf.test(NTOA) #HO->No Estacionariedad
+#KPSS
+kpss_NTOA<-kpss.test(NTOA,null = "Level") #HO-> Estacionariedad
+#PP
+pp_NTOA<-pp.test(NTOA) #H0->No Estacionariedad
+
+#ANALIZAMOS ESTACIONARIEDAD EN VARIANZA
+particion_NTOA <- length(NTOA)/2
+NTOA1 <- NTOA[1:particion_NTOA]
+NTOA2 <- NTOA[(particion_NTOA+ 1):length(NTOA)]
+
+var1_NTOA<-var(NTOA1)
+var2_NTOA<-var(NTOA2)
+
+RatioF_NTOA<- max(var1_NTOA, var2_NTOA)/min(var1_NTOA, var2_NTOA)
+
+df1_NTOA1 <- length(NTOA1) - 1
+df2_NTOA2 <- length(NTOA2) - 1
+p_value_VARI_NTOA <- 1 - pf(RatioF_NTOA, df1_NTOA1, df2_NTOA2)  #EL PROCESO ESTOCÁSTICO NO ES ESTACIONARIO EN VARIANZA
+
+#REALIZAMOS LAS CORRECCIONES
+NTOA_corr<- diff(log(NTOA))
+
+#Dickey-Fuller
+adftest_NTOA_diff1<-adf.test(NTOA_corr) #HO->No Estacionariedad
+#KPSS
+kpss_NTOA_diff1<-kpss.test(NTOA_corr,null = "Level") #HO-> Estacionariedad
+#PP
+pp_NTOA_diff1<-pp.test(NTOA_corr) #H0->No Estacionariedad
+
+#FASE 1.2 ENCONTRAR EL ORDEN AR Y MA
+
+ggAcf(NTOA_corr)
+ggPacf(NTOA_corr)
+
+fitNTOA_1  <- Arima(log(NTOA), c(1,1,0), method="ML")
+fitNTOA_2  <- Arima(log(NTOA), c(2,1,0))
+fitNTOA_3  <- Arima(log(NTOA), c(3,1,0))
+fitNTOA_4  <- Arima(log(NTOA), c(4,1,0))
+fitNTOA_5  <- Arima(log(NTOA), c(5,1,0))
+
+fitNTOA_6  <- Arima(log(NTOA), c(1,1,1), method="ML")
+fitNTOA_7  <- Arima(log(NTOA), c(2,1,1))
+fitNTOA_8  <- Arima(log(NTOA), c(3,1,1))
+fitNTOA_9  <- Arima(log(NTOA), c(4,1,1))
+fitNTOA_10 <- Arima(log(NTOA), c(5,1,1))
+
+fitNTOA_11 <- Arima(log(NTOA), c(1,1,2))
+fitNTOA_12 <- Arima(log(NTOA), c(2,1,2))
+fitNTOA_13 <- Arima(log(NTOA), c(3,1,2))
+fitNTOA_14 <- Arima(log(NTOA), c(4,1,2))
+fitNTOA_15 <- Arima(log(NTOA), c(5,1,2))
+
+fitNTOA_16 <- Arima(log(NTOA), c(1,1,3))
+fitNTOA_17 <- Arima(log(NTOA), c(2,1,3))
+fitNTOA_18 <- Arima(log(NTOA), c(2,1,4))
+fitNTOA_19 <- Arima(log(NTOA), c(2,1,5))
+
+fitNTOA_20 <- Arima(log(NTOA), c(3,1,3))
+fitNTOA_21 <- Arima(log(NTOA), c(3,1,4))
+fitNTOA_22 <- Arima(log(NTOA), c(3,1,5))
+
+fitNTOA_23 <- Arima(log(NTOA), c(4,1,3))
+fitNTOA_24 <- Arima(log(NTOA), c(4,1,4))
+fitNTOA_25 <- Arima(log(NTOA), c(4,1,5))
+
+fitNTOA_26 <- Arima(log(NTOA), c(5,1,3))
+fitNTOA_27 <- Arima(log(NTOA), c(5,1,4),method = "ML")
+fitNTOA_28 <- Arima(log(NTOA), c(5,1,5))
+
+#MENOR BIC
+min(fitNTOA_1$bic, fitNTOA_2$bic, fitNTOA_3$bic, fitNTOA_4$bic, fitNTOA_5$bic, 
+    fitNTOA_5$bic, fitNTOA_6$bic, fitNTOA_7$bic, fitNTOA_8$bic, fitNTOA_9$bic, fitNTOA_10$bic)
+
+bics <- c(fitNTOA_1$bic, fitNTOA_2$bic, fitNTOA_3$bic, fitNTOA_4$bic, fitNTOA_5$bic, 
+          fitNTOA_5$bic, fitNTOA_6$bic, fitNTOA_7$bic, fitNTOA_8$bic, fitNTOA_9$bic, fitNTOA_10$bic)
+
+NTOA_bic <- which.min(bics)
+NTOA_bic
+
+#calculamos el menor AIC
+min(fitNTOA_1$aic, fitNTOA_2$aic, fitNTOA_3$aic, fitNTOA_4$aic, fitNTOA_5$aic, 
+    fitNTOA_6$aic, fitNTOA_7$aic, fitNTOA_8$aic, fitNTOA_9$aic)
+
+aics <- c(fitNTOA_1$aic, fitNTOA_2$aic, fitNTOA_3$aic, fitNTOA_4$aic, fitNTOA_5$aic, 
+          fitNTOA_6$aic, fitNTOA_7$aic, fitNTOA_8$aic, fitNTOA_9$aic,fitNTOA_10$aic)
+
+NTOA_aic <- which.min(aics)
+NTOA_aic
+
+#calculamos el menor AIC corregido
+min(fitNTOA_1$aicc, fitNTOA_2$aicc, fitNTOA_3$aicc, fitNTOA_4$aicc, fitNTOA_5$aicc, 
+    fitNTOA_6$aicc, fitNTOA_7$aicc, fitNTOA_8$aicc, fitNTOA_9$aicc,fitNTOA_10$aicc)
+
+aiccs <- c(fitNTOA_1$aicc, fitNTOA_2$aicc, fitNTOA_3$aicc, fitNTOA_4$aicc, fitNTOA_5$aicc, 
+           fitNTOA_6$aicc, fitNTOA_7$aicc, fitNTOA_8$aicc, fitNTOA_9$aicc,fitNTOA_10$aicc)
+
+
+NTOA_aicc <- which.min(aiccs)
+NTOA_aicc
+
+#ESTIMACIÓN DE PARÁMETROS. CON MODELO 1 y 6
+
+#MODELO 1
+coefis1_NTOA<-fitNTOA_1$coef
+se1NTOA <- sqrt(diag(fitNTOA_1$var.coef))
+testT1_NTOA<- coefis1_NTOA/se1NTOA
+
+interT1_NTOA<- c()
+for (i in 1:length(testT1_NTOA)) {
+  if (abs(testT1_NTOA[i])>1.96) {
+    interT1_NTOA[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT1_NTOA[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT1_NTOA)<-c("ar1")
+interT1_NTOA  
+
+#MODELO 6
+coefis2_NTOA<-fitNTOA_6$coef
+se2NTOA <- sqrt(diag(fitNTOA_6$var.coef))
+testT2_NTOA<- coefis2_NTOA/se2NTOA
+
+interT2_NTOA<- c()
+for (i in 1:length(testT2_NTOA)) {
+  if (abs(testT2_NTOA[i])>1.96) {
+    interT2_NTOA[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT2_NTOA[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT2_NTOA)<-c("ar1","ma1")
+interT2_NTOA  
+
+#DIAGNÓSTICO CON ARIMA(1,1,0)
+
+#DIAGNÓSIS
+checkresiduals(fitNTOA_1)  #PREELIMINAR
+res_NTOA_1 <- residuals(fitNTOA_1)
+
+#CORRELACIÓN DE LOS RESIDUOS
+
+Box.test(res_NTOA_1 , lag = sqrt(length(res_NTOA_1)), type = c("Ljung-Box")) #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR INCORRELACIÓN RESIDUOS
+
+#NORMALIDAD DE LOS RESIDUOS
+
+cvm.test(res_NTOA_1,"pnorm",0,sd(res_NTOA_1),estimated = TRUE)
+ad.test(res_NTOA_1,"pnorm",0,sd(res_NTOA_1),estimated = TRUE)
+jarque.bera.test(res_NTOA_1) #EN CVM Y AD NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR LA NORMALIDAD DE LOS RESIDUOS. JARQUE-BERA DA PROBLEMAS (SABEMOS QUE ESTE TEST TIENE PROBLEMAS)
+
+#MEDIA 0
+qnorm(c(0.025,0.975),0,sd(res_NTOA_1)/sqrt(length(res_NTOA_1)))
+mean(res_NTOA_1)  #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR QUE LA MEDIA DE LOS RESIDUOS SEA 0
+
+#HOMOCEDASTICIDAD
+
+y_NTOA <- res_NTOA_1^2  
+
+fitted_valsNTOA <- fitted(fitNTOA_7)
+
+df_NTOA <- data.frame(
+  y_NTOA = y_NTOA,
+  fitted_valsNTOA = fitted_valsNTOA
+)
+
+df_NTOA<- df_NTOA[complete.cases(df_NTOA), ]
+
+
+fitaux_NTOA<-lm(y_NTOA ~fitted_valsNTOA)
+dfreedom_NTOA<-4
+bp.statistic_NTOA<-(length(y_NTOA)-dfreedom_NTOA)*summary(fitaux_NTOA)$r.squared
+bp.pvalue_NTOA<-1-pchisq(bp.statistic_NTOA,dfreedom_NTOA)
+
+
+#PREDICCIÓN CON BOOTSTRAP
+fit_NTOA <- Arima(log(NTOA), c(2,1,2))
+res_NTOA <- residuals(fit_NTOA)
+
+pred_boot_NTOA <- predict_arima_bootstrap(
+  model = fit_NTOA,
+  residuals = res_NTOA,
+  original_series = NTOA,
+  n_bootstrap = 1000,
+  h = 3
+)
+
+print(pred_boot_NTOA$mean)
+
+
+
+last_values_original <- tail(NTOA, 12)
+time_points <- c(seq(-11, 0), 1:3)
+
+plot_data_original <- data.frame(
+  Time = time_points,
+  Value = c(last_values_original, pred_boot_NTOA$mean),
+  Type = c(rep("Observado", 12), rep("Predicción", 3)),
+  Lower = c(rep(NA, 12), pred_boot_NTOA$lower),
+  Upper = c(rep(NA, 12), pred_boot_NTOA$upper)
+)
+
+ggplot(plot_data_original, aes(x = Time, y = Value, color = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Observado"), 
+            linewidth = 0.8, alpha = 0.8) +
+  geom_point(size = 3, aes(shape = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Predicción"), 
+            linewidth = 1, linetype = "dashed") +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), 
+              fill = "steelblue", alpha = 0.2) +
+  geom_point(data = subset(plot_data_original, Type == "Predicción"), 
+             size = 4, shape = 18) +
+  labs(title = "Predicción a 3 pasos - ARIMA(5,1,4) para NTOA",
+       subtitle = "Intervalos predictivos al 95% obtenidos por bootstrap",
+       x = "Pasos Temporales",
+       y = "Valor de NTOA",
+       color = "",
+       shape = "") +
+  scale_x_continuous(breaks = time_points,
+                     labels = c(paste0("t-", 11:1), "t", "t+1", "t+2", "t+3")) +
+  scale_color_manual(values = c("Observado" = "darkblue", "Predicción" = "red")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+#POINTFORECAST 
+point_forecast_NTOA_1<-pred_boot_NTOA$mean[1]
+point_forecast_NTOA_2<-pred_boot_NTOA$mean[2]
+point_forecast_NTOA_3<-pred_boot_NTOA$mean[3]
+
+
+#INTERVALFORECAST MORTALIDAD
+
+pred_boot_NTOA_nl<- unlist(pred_boot_NTOA)
+interval_NTOA<-quantile(pred_boot_NTOA_nl,c(0.025,0.975))
+
+
+#DENSITY FORECAST MORTALIDAD
+density_NTOA<- density(pred_boot_NTOA_nl)
+plot(density_NTOA)
+
+
+#VaR
+VaR_NTOA<- quantile(pred_boot_NTOA_nl,0.01)
+VaR_NTOA
+
+#TvAR coste
+TvAR_NTOA<- mean(pred_boot_NTOA_nl[pred_boot_NTOA_nl<VaR_NTOA])
+TvAR_NTOA
+
+#ECONOMIC CAPITAL
+
+economic_capital_NTOA<- mean(pred_boot_NTOA_nl)-VaR_NTOA
+economic_capital_NTOA
+
+#PLTR
+
+  #FASE 1.1 IDENTIFICAR ESTACIONARIEDAD EN MEDIA
+
+ggAcf(PLTR)
+
+#Dickey-Fuller
+adftest_PLTR<-adf.test(PLTR) #HO->No Estacionariedad
+#KPSS
+kpss_PLTR<-kpss.test(PLTR,null = "Level") #HO-> Estacionariedad
+#PP
+pp_PLTR<-pp.test(PLTR) #H0->No Estacionariedad
+
+diff_PLTR <- diff(PLTR)
+
+    #ESTUDIAMOS ESTACIONARIEDAD EN VARIANZA
+
+particion_PLTR <- floor(length(diff_PLTR)/2)
+PLTR_1 <- PLTR[1:particion_PLTR]
+PLTR_2 <- PLTR[(particion_PLTR+ 1):length(PLTR)]
+
+var1_PLTR<-var(PLTR_1)
+var2_PLTR<-var(PLTR_2)
+
+RatioF_PLTR<- max(var1_PLTR, var2_PLTR)/min(var1_PLTR, var2_PLTR)
+
+df1_PLTR <- length(PLTR_1) - 1
+df2_PLTR <- length(PLTR_2) - 1
+p_value_VARI_PLTR <- 1 - pf(RatioF_PLTR, df1_PLTR, df2_PLTR)  #EL PROCESO ES HETEROCEDÁSTICO
+
+#CORREGIMOS
+PLTR_corr<- diff(log(PLTR))
+
+#Dickey-Fuller
+adftest_PLTR_corrdiff1<-adf.test(PLTR_corr) #HO->No Estacionariedad
+#KPSS
+kpss_PLTR_corrdiff1<-kpss.test(PLTR_corr,null = "Level") #HO-> Estacionariedad
+#PP
+pp_PLTR_corrdiff1<-pp.test(PLTR_corr) #H0->No Estacionariedad
+
+
+
+#FASE 1.2 ENCONTRAR EL ORDEN AR Y MA
+
+ggAcf(PLTR_corr)
+ggPacf(PLTR_corr)
+
+fitPLTR_1  <- Arima(log(PLTR), c(1,1,0), method="ML")
+fitPLTR_2  <- Arima(log(PLTR), c(2,1,0), method="ML")
+fitPLTR_3  <- Arima(log(PLTR), c(3,1,0))
+fitPLTR_4  <- Arima(log(PLTR), c(4,1,0))
+fitPLTR_5  <- Arima(log(PLTR), c(5,1,0))
+
+fitPLTR_6  <- Arima(log(PLTR), c(1,1,1), method="ML")
+fitPLTR_7  <- Arima(log(PLTR), c(2,1,1))
+fitPLTR_8  <- Arima(log(PLTR), c(3,1,1))
+fitPLTR_9  <- Arima(log(PLTR), c(4,1,1))
+fitPLTR_10 <- Arima(log(PLTR), c(5,1,1))
+
+fitPLTR_11 <- Arima(log(PLTR), c(1,1,2))
+fitPLTR_12 <- Arima(log(PLTR), c(2,1,2))
+fitPLTR_13 <- Arima(log(PLTR), c(3,1,2))
+fitPLTR_14 <- Arima(log(PLTR), c(4,1,2))
+fitPLTR_15 <- Arima(log(PLTR), c(5,1,2))
+
+fitPLTR_16 <- Arima(log(PLTR), c(1,1,3))
+fitPLTR_17 <- Arima(log(PLTR), c(2,1,3))
+fitPLTR_18 <- Arima(log(PLTR), c(2,1,4))
+fitPLTR_19 <- Arima(log(PLTR), c(2,1,5))
+
+fitPLTR_20 <- Arima(log(PLTR), c(3,1,3))
+fitPLTR_21 <- Arima(log(PLTR), c(3,1,4))
+fitPLTR_22 <- Arima(log(PLTR), c(3,1,5))
+
+fitPLTR_23 <- Arima(log(PLTR), c(4,1,3))
+fitPLTR_24 <- Arima(log(PLTR), c(4,1,4))
+fitPLTR_25 <- Arima(log(PLTR), c(4,1,5))
+
+fitPLTR_26 <- Arima(log(PLTR), c(5,1,3))
+fitPLTR_27 <- Arima(log(PLTR), c(5,1,4),method = "ML")
+fitPLTR_28 <- Arima(log(PLTR), c(5,1,5))
+
+
+#calculamos menor BIC
+min(
+  fitPLTR_1$bic,  fitPLTR_2$bic,  fitPLTR_3$bic,  fitPLTR_4$bic,  fitPLTR_5$bic,
+  fitPLTR_6$bic,  fitPLTR_7$bic,  fitPLTR_8$bic,  fitPLTR_9$bic,  fitPLTR_10$bic,
+  fitPLTR_11$bic, fitPLTR_12$bic, fitPLTR_13$bic, fitPLTR_14$bic, fitPLTR_15$bic,
+  fitPLTR_16$bic, fitPLTR_17$bic, fitPLTR_18$bic, fitPLTR_19$bic, fitPLTR_20$bic,
+  fitPLTR_21$bic, fitPLTR_22$bic, fitPLTR_23$bic, fitPLTR_24$bic, fitPLTR_25$bic,
+  fitPLTR_26$bic, fitPLTR_27$bic, fitPLTR_28$bic
+)
+
+bics <- c(
+  fitPLTR_1$bic,  fitPLTR_2$bic,  fitPLTR_3$bic,  fitPLTR_4$bic,  fitPLTR_5$bic,
+  fitPLTR_6$bic,  fitPLTR_7$bic,  fitPLTR_8$bic,  fitPLTR_9$bic,  fitPLTR_10$bic,
+  fitPLTR_11$bic, fitPLTR_12$bic, fitPLTR_13$bic, fitPLTR_14$bic, fitPLTR_15$bic,
+  fitPLTR_16$bic, fitPLTR_17$bic, fitPLTR_18$bic, fitPLTR_19$bic, fitPLTR_20$bic,
+  fitPLTR_21$bic, fitPLTR_22$bic, fitPLTR_23$bic, fitPLTR_24$bic, fitPLTR_25$bic,
+  fitPLTR_26$bic, fitPLTR_27$bic, fitPLTR_28$bic
+)
+
+PLTR_bic <- which.min(bics)
+PLTR_bic
+
+#calculamos el menor AIC
+min(
+  fitPLTR_1$aic,  fitPLTR_2$aic,  fitPLTR_3$aic,  fitPLTR_4$aic,  fitPLTR_5$aic,
+  fitPLTR_6$aic,  fitPLTR_7$aic,  fitPLTR_8$aic,  fitPLTR_9$aic,  fitPLTR_10$aic,
+  fitPLTR_11$aic, fitPLTR_12$aic, fitPLTR_13$aic, fitPLTR_14$aic, fitPLTR_15$aic,
+  fitPLTR_16$aic, fitPLTR_17$aic, fitPLTR_18$aic, fitPLTR_19$aic, fitPLTR_20$aic,
+  fitPLTR_21$aic, fitPLTR_22$aic, fitPLTR_23$aic, fitPLTR_24$aic, fitPLTR_25$aic,
+  fitPLTR_26$aic, fitPLTR_27$aic, fitPLTR_28$aic
+)
+
+aics <- c(
+  fitPLTR_1$aic,  fitPLTR_2$aic,  fitPLTR_3$aic,  fitPLTR_4$aic,  fitPLTR_5$aic,
+  fitPLTR_6$aic,  fitPLTR_7$aic,  fitPLTR_8$aic,  fitPLTR_9$aic,  fitPLTR_10$aic,
+  fitPLTR_11$aic, fitPLTR_12$aic, fitPLTR_13$aic, fitPLTR_14$aic, fitPLTR_15$aic,
+  fitPLTR_16$aic, fitPLTR_17$aic, fitPLTR_18$aic, fitPLTR_19$aic, fitPLTR_20$aic,
+  fitPLTR_21$aic, fitPLTR_22$aic, fitPLTR_23$aic, fitPLTR_24$aic, fitPLTR_25$aic,
+  fitPLTR_26$aic, fitPLTR_27$aic, fitPLTR_28$aic
+)
+
+PLTR_aic <- which.min(aics)
+PLTR_aic
+
+#calculamos el menor AIC corregido
+min(
+  fitPLTR_1$aicc, fitPLTR_2$aicc, fitPLTR_3$aicc, fitPLTR_4$aicc, fitPLTR_5$aicc, 
+  fitPLTR_6$aicc, fitPLTR_7$aicc, fitPLTR_8$aicc, fitPLTR_9$aicc, fitPLTR_10$aicc,
+  fitPLTR_11$aicc, fitPLTR_12$aicc, fitPLTR_13$aicc, fitPLTR_14$aicc, fitPLTR_15$aicc,
+  fitPLTR_16$aicc, fitPLTR_17$aicc, fitPLTR_18$aicc, fitPLTR_19$aicc, fitPLTR_20$aicc,
+  fitPLTR_21$aicc, fitPLTR_22$aicc, fitPLTR_23$aicc, fitPLTR_24$aicc, fitPLTR_25$aicc,
+  fitPLTR_26$aicc, fitPLTR_27$aicc, fitPLTR_28$aicc
+)
+
+aiccs <- c(
+  fitPLTR_1$aicc, fitPLTR_2$aicc, fitPLTR_3$aicc, fitPLTR_4$aicc, fitPLTR_5$aicc, 
+  fitPLTR_6$aicc, fitPLTR_7$aicc, fitPLTR_8$aicc, fitPLTR_9$aicc, fitPLTR_10$aicc,
+  fitPLTR_11$aicc, fitPLTR_12$aicc, fitPLTR_13$aicc, fitPLTR_14$aicc, fitPLTR_15$aicc,
+  fitPLTR_16$aicc, fitPLTR_17$aicc, fitPLTR_18$aicc, fitPLTR_19$aicc, fitPLTR_20$aicc,
+  fitPLTR_21$aicc, fitPLTR_22$aicc, fitPLTR_23$aicc, fitPLTR_24$aicc, fitPLTR_25$aicc,
+  fitPLTR_26$aicc, fitPLTR_27$aicc, fitPLTR_28$aicc
+)
+
+PLTR_aicc <- which.min(aiccs)
+PLTR_aicc 
+
+#ANALIZAMOS MODELOS 1 Y 27
+
+      #MODELO 1
+fitPLTR_1 
+
+coefis_PLTR_1<-fitPLTR_1$coef
+sePLTR_1 <- sqrt(diag(fitPLTR_1$var.coef))
+testT_PLTR_1<- coefis_PLTR_1/sePLTR_1
+
+interT_PLTR_1<- c()
+for (i in 1:length(testT_PLTR_1)) {
+  if (abs(testT_PLTR_1[i])>1.96) {
+    interT_PLTR_1[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT_PLTR_1[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT_PLTR_1)<-c("ar1")
+interT_PLTR_1
+
+#FASE DE DIAGNÓSIS PARA EL PROCESO 1
+checkresiduals(fitPLTR_1)  #PREELIMINAR
+res_PLTR_1<- residuals(fitPLTR_1)
+
+#CORRELACIÓN DE LOS RESIDUOS
+
+Box.test(res_PLTR_1 , lag = sqrt(length(res_PLTR_1)), type = c("Ljung-Box")) #RESIDUOS CORRELADOS
+#RESIDUOS CORRELADOS INCREMENTAMOS EN 1 EL ORDEN AR PARA INTENTAR SOLUCIONARLO
+
+fitPLTR_2
+
+coefis_PLTR2_<-fitPLTR_2$coef
+sePLTR2 <- sqrt(diag(fitPLTR_2$var.coef))
+testT_PLTR2<- coefis_PLTR2_/sePLTR2
+
+interT_PLTR2<- c()
+for (i in 1:length(testT_PLTR2)) {
+  if (abs(testT_PLTR2[i])>1.96) {
+    interT_PLTR2[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT_PLTR2[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT_PLTR2)<-c("ar1","ar2")
+interT_PLTR2
+
+#EN LUGAR DE INCREMENTAR EL ORDEN AR, PROBAMOS A INCREMENTAR EL ORDEN MA
+
+fitPLTR_6
+
+coefis_PLTR6_<-fitPLTR_6$coef
+sePLTR6 <- sqrt(diag(fitPLTR_6$var.coef))
+testT_PLTR6<- coefis_PLTR6_/sePLTR6
+
+interT_PLTR6<- c()
+for (i in 1:length(testT_PLTR6)) {
+  if (abs(testT_PLTR6[i])>1.96) {
+    interT_PLTR6[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT_PLTR6[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT_PLTR6)<-c("ar1","ma1")
+interT_PLTR6
+
+#DECIDIMOS TRABAJAR CON EL MODELO 27
+
+      #MODELO 27
+
+fitPLTR_27 
+
+coefis_PLTR_2<-fitPLTR_27$coef
+sePLTR_2 <- sqrt(diag(fitPLTR_27$var.coef))
+testT_PLTR_2<- coefis_PLTR_2/sePLTR_2
+
+interT_PLTR_2<- c()
+for (i in 1:length(testT_PLTR_2)) {
+  if (abs(testT_PLTR_2[i])>1.96) {
+    interT_PLTR_2[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT_PLTR_2[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT_PLTR_2)<-c("ar1","ar2","ar3","ar4","ar5","ma1","ma2","ma3","ma4")
+interT_PLTR_2
+
+#FASE DE DIAGNÓSIS PARA EL PROCESO 1
+
+checkresiduals(fitPLTR_27)  #PREELIMINAR
+res_PLTR_2<- residuals(fitPLTR_27)
+
+#CORRELACIÓN DE LOS RESIDUOS
+
+Box.test(res_PLTR_2 , lag = sqrt(length(res_PLTR_2)), type = c("Ljung-Box")) #RESIDUOS CORRELADOS
+
+
+#NORMALIDAD DE LOS RESIDUOS
+
+cvm.test(res_PLTR_2,"pnorm",0,sd(res_PLTR_2),estimated = TRUE)
+ad.test(res_PLTR_2,"pnorm",0,sd(res_PLTR_2),estimated = TRUE)
+jarque.bera.test(res_PLTR_2) #EN CVM Y AD NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR LA NORMALIDAD DE LOS RESIDUOS. JARQUE-BERA DA PROBLEMAS (SABEMOS QUE ESTE TEST TIENE PROBLEMAS)
+
+#MEDIA 0
+qnorm(c(0.025,0.975),0,sd(res_PLTR_2)/sqrt(length(res_PLTR_2)))
+mean(res_PLTR_2)
+
+#HOMOCEDASTICIDAD
+
+y_PLTR <- res_PLTR_2^2  
+
+fitted_valsPLTR <- fitted(fitPLTR_27)
+
+df_PLTR <- data.frame(
+  y_PLTR = y_PLTR,
+  fitted_valsPLTR = fitted_valsPLTR
+)
+
+df_PLTR<- df_PLTR[complete.cases(df_PLTR), ]
+
+
+fitaux_PLTR<-lm(y_PLTR ~fitted_valsPLTR)
+dfreedom_PLTR<-9
+bp.statistic_PLTR<-(length(y_PLTR)-dfreedom_PLTR)*summary(fitaux_PLTR)$r.squared
+bp.pvalue_PLTR<-1-pchisq(bp.statistic_PLTR,dfreedom_PLTR)
+
+#PREDICCION POR BOOTSTRAP
+
+fit_PLTR <- Arima(log(PLTR), c(5,1,4),method = "ML")
+res_PLTR <- residuals(fit_PLTR)
+
+
+pred_boot_PLTR <- predict_arima_bootstrap(
+  model = fit_PLTR,
+  residuals = res_PLTR,
+  original_series = PLTR,
+  n_bootstrap = 1000,
+  h = 3
+)
+
+print(pred_boot_PLTR$mean)
+
+
+last_values_original <- tail(PLTR, 12)
+time_points <- c(seq(-11, 0), 1:3)
+
+plot_data_original <- data.frame(
+  Time = time_points,
+  Value = c(last_values_original, pred_boot_PLTR$mean),
+  Type = c(rep("Observado", 12), rep("Predicción", 3)),
+  Lower = c(rep(NA, 12), pred_boot_PLTR$lower),
+  Upper = c(rep(NA, 12), pred_boot_PLTR$upper)
+)
+
+ggplot(plot_data_original, aes(x = Time, y = Value, color = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Observado"), 
+            linewidth = 0.8, alpha = 0.8) +
+  geom_point(size = 3, aes(shape = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Predicción"), 
+            linewidth = 1, linetype = "dashed") +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), 
+              fill = "steelblue", alpha = 0.2) +
+  geom_point(data = subset(plot_data_original, Type == "Predicción"), 
+             size = 4, shape = 18) +
+  labs(title = "Predicción a 3 pasos - ARIMA(5,1,4) para PLTR",
+       subtitle = "Intervalos predictivos al 95% obtenidos por bootstrap",
+       x = "Pasos Temporales",
+       y = "Valor de PLTR",
+       color = "",
+       shape = "") +
+  scale_x_continuous(breaks = time_points,
+                     labels = c(paste0("t-", 11:1), "t", "t+1", "t+2", "t+3")) +
+  scale_color_manual(values = c("Observado" = "darkblue", "Predicción" = "red")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+#POINTFORECAST 
+point_forecast_PLTR_1<-pred_boot_PLTR$mean[1]
+point_forecast_PLTR_2<-pred_boot_PLTR$mean[2]
+point_forecast_PLTR_3<-pred_boot_PLTR$mean[3]
+
+
+#INTERVALFORECAST 
+
+pred_boot_PLTR_nl<- unlist(pred_boot_PLTR)
+interval_PLTR<-quantile(pred_boot_PLTR_nl,c(0.025,0.975))
+
+
+#DENSITY FORECAST MORTALIDAD
+density_PLTR<- density(pred_boot_PLTR_nl)
+plot(density_PLTR)
+
+
+#VaR
+VaR_PLTR<- quantile(pred_boot_PLTR_nl,0.01)
+VaR_PLTR
+
+#TvAR coste
+TvAR_PLTR<- mean(pred_boot_PLTR_nl[pred_boot_PLTR_nl<VaR_PLTR])
+TvAR_PLTR
+
+#ECONOMIC CAPITAL
+
+economic_capital_PLTR<- mean(pred_boot_PLTR_nl)-VaR_PLTR  
+economic_capital_PLTR
+
+
+
+#UNH
+
+
+#FASE 1.1 IDENTIFICAMOS ESTACIONARIEDAD EN MEDIA
+
+ggAcf(UNH)
+
+
+#Dickey-Fuller
+#adftest_UNH<-adf.test(UNH) #HO->No Estacionariedad
+#KPSS
+kpss_UNH<-kpss.test(UNH,null = "Level") #HO-> Estacionariedad
+#PP
+#pp_UNH<-pp.test(UNH) #H0->No Estacionariedad
+
+UNH_diff1<- diff(UNH)
+
+#Dickey-Fuller
+#adftest_UNH_diff1<-adf.test(log(UNH_diff1)) #HO->No Estacionariedad
+#KPSS
+#kpss_UNH_diff1<-kpss.test(log(UNH_diff1,null = "Level")) #HO-> Estacionariedad
+#PP
+#pp_UNH_diff1<-pp.test(log(UNH_diff1)) #H0->No Estacionariedad
+
+#SE TOMA 1 DIFERENCIA PARA HACER ESTACIONARIA EN MEDIA
+
+#ANALIZAMOS ESTACIONARIEDAD EN VARIANZA
+
+particion_UNH_diff1 <- floor(length(UNH_diff1)/2)
+UNH_diff1_1 <- UNH_diff1[1:particion_UNH_diff1]
+UNH_diff1_2 <- UNH_diff1[(particion_UNH_diff1+ 1):length(UNH_diff1)]
+
+var1_UNH_diff1<-var(UNH_diff1_1)
+var2_UNH_diff1<-var(UNH_diff1_2)
+
+RatioF_UNH_diff1<- max(var1_UNH_diff1, var2_UNH_diff1)/min(var1_UNH_diff1, var2_UNH_diff1)
+
+df1_UNH_diff1 <- length(UNH_diff1_1) - 1
+df2_UNH_diff1 <- length(UNH_diff1_2) - 1
+p_value_VARI_UNH_diff1 <- 1 - pf(RatioF_UNH_diff1, df1_UNH_diff1, df2_UNH_diff1)  #EL PROCESO ES HETEROCEDÁSTICO
+
+####rechazamos la homocedasticidad por lo que deberiamos trabajar la variable en logs
+
+UNH_diff1_log=diff(log(UNH))
+UNH_log=log(UNH)
+
+#FASE 1.2 ENCONTRAR EL ORDEN AR Y MA
+
+ggAcf(UNH_diff1_log)
+ggPacf(UNH_diff1_log)
+
+
+fitUNH_1 <- Arima(UNH_log, c(2,1,1))
+fitUNH_2 <- Arima(UNH_log, c(2,1,0))
+fitUNH_3 <- Arima(UNH_log, c(1,1,2))
+fitUNH_4 <- Arima(UNH_log, c(1,1,1))
+fitUNH_5 <- Arima(UNH_log, c(1,1,0))
+fitUNH_6 <- Arima(UNH_log, c(1,1,3))
+fitUNH_7 <- Arima(UNH_log, c(2,1,2))
+fitUNH_8 <- Arima(UNH_log, c(3,1,2))
+fitUNH_9<-Arima(UNH_log,c(1,1,0),include.constant = "TRUE", method="ML")
+
+
+summary(fitUNH_1) 
+summary(fitUNH_2) 
+summary(fitUNH_3) 
+summary(fitUNH_4) 
+summary(fitUNH_5)
+summary(fitUNH_6)
+
+
+# Calculamos el menor BIC
+min(fitUNH_1$bic, fitUNH_2$bic, fitUNH_3$bic, fitUNH_4$bic, fitUNH_5$bic, 
+    fitUNH_6$bic, fitUNH_7$bic, fitUNH_8$bic,fitUNH_9$bic)
+
+bics_unh <- c(fitUNH_1$bic, fitUNH_2$bic, fitUNH_3$bic, fitUNH_4$bic, fitUNH_5$bic, 
+              fitUNH_6$bic, fitUNH_7$bic, fitUNH_8$bic,fitUNH_9$bic)
+
+unh_bic <- which.min(bics_unh)
+unh_bic
+
+# Calculamos el menor AIC
+min(fitUNH_1$aic, fitUNH_2$aic, fitUNH_3$aic, fitUNH_4$aic, fitUNH_5$aic, 
+    fitUNH_6$aic, fitUNH_7$aic, fitUNH_8$aic,fitUNH_9$aic)
+
+aics_unh <- c(fitUNH_1$aic, fitUNH_2$aic, fitUNH_3$aic, fitUNH_4$aic, fitUNH_5$aic, 
+              fitUNH_6$aic, fitUNH_7$aic, fitUNH_8$aic,fitUNH_9$aic)
+
+unh_aic <- which.min(aics_unh)
+unh_aic
+
+# Calculamos el menor AIC corregido
+min(fitUNH_1$aicc, fitUNH_2$aicc, fitUNH_3$aicc, fitUNH_4$aicc, fitUNH_5$aicc, 
+    fitUNH_6$aicc, fitUNH_7$aicc, fitUNH_8$aicc,fitUNH_9$aicc)
+
+aiccs_unh <- c(fitUNH_1$aicc, fitUNH_2$aicc, fitUNH_3$aicc, fitUNH_4$aicc, fitUNH_5$aicc, 
+               fitUNH_6$aicc, fitUNH_7$aicc, fitUNH_8$aicc,fitUNH_9$aicc)
+
+unh_aicc <- which.min(aiccs_unh)
+unh_aicc
+
+# Calculamos el menor RMSE
+modelos_unh <- list(fitUNH_1, fitUNH_2, fitUNH_3, fitUNH_4, fitUNH_5, 
+                    fitUNH_6, fitUNH_7, fitUNH_8,fitUNH_9)
+
+rmse_vals_unh <- sapply(modelos_unh, function(modelo) accuracy(modelo)[1, "RMSE"])
+
+unh_rmse <- which.min(rmse_vals_unh)
+unh_rmse
+
+
+#####Da el fitUNH_5 como mejor modelo (ARIMA(1,1,0))
+
+#ESTIMACIÓN DE PARÁMETROS OJO
+coefis_log_UNH<-fitUNH_5$coef
+se_log_UNH <- sqrt(diag(fitUNH_5$var.coef))
+testT_log_UNH<- coefis_log_UNH/se_log_UNH
+
+interT_log_UNH<- c()
+for (i in 1:length(testT_log_UNH)) {
+  if (abs(testT_log_UNH[i])>1.96) {
+    interT_log_UNH[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT_log_UNH[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT_log_UNH)<-c("ar1")
+interT_log_UNH 
+
+#es significativo
+
+#FASE DE DIAGNÓSIS
+checkresiduals(fitUNH_5)  #PREELIMINAR
+res_UNH_5 <- residuals(fitUNH_5)
+
+#CORRELACIÓN DE LOS RESIDUOS
+
+Box.test(res_UNH_5 , lag = sqrt(length(diff(UNH))), type = c("Ljung-Box")) #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR INCORRELACIÓN RESIDUOS
+
+#NORMALIDAD DE LOS RESIDUOS
+
+cvm.test(res_UNH_5,"pnorm",0,sd(res_UNH_5),estimated = TRUE)
+ad.test(res_UNH_5,"pnorm",0,sd(res_UNH_5),estimated = TRUE)
+jarque.bera.test(res_UNH_5) #EN CVM Y AD NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR LA NORMALIDAD DE LOS RESIDUOS. JARQUE-BERA DA PROBLEMAS (SABEMOS QUE ESTE TEST TIENE PROBLEMAS)
+
+#MEDIA 0
+qnorm(c(0.025,0.975),0,sd(res_UNH_5)/sqrt(length(res_UNH_5)))
+mean(res_UNH_5)  #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR QUE LA MEDIA DE LOS RESIDUOS SEA 0
+
+#HOMOCEDASTICIDAD
+y_UNH <- res_UNH_5^2  
+
+fitted_valsUNH <- fitted(fitUNH_5)
+
+df_UNH <- data.frame(
+  y_UNH = y_UNH,
+  fitted_valsUNH = fitted_valsUNH
+)
+
+df_UNH<- df_UNH[complete.cases(df_UNH), ]
+
+
+fitaux_UNH<-lm(y_UNH ~fitted_valsUNH)
+dfreedom_UNH<-1
+bp.statistic_UNH<-(length(y_UNH)-dfreedom_UNH)*summary(fitaux_UNH)$r.squared
+bp.pvalue_UNH<-1-pchisq(bp.statistic_UNH,dfreedom_UNH)
+
+
+#PREDICCION POR BOOTSTRAP
+
+fit_UNH <- Arima(UNH_log, c(1,1,0))
+res_UNH <- residuals(fitUNH_5)
+
+
+pred_boot_UNH <- predict_arima_bootstrap(
+  model = fit_UNH,
+  residuals = res_UNH,
+  original_series = UNH,
+  n_bootstrap = 1000,
+  h = 3
+)
+
+print(pred_boot_UNH$mean)
+
+
+
+
+last_values_original <- tail(UNH, 12)
+time_points <- c(seq(-11, 0), 1:3)
+
+plot_data_original <- data.frame(
+  Time = time_points,
+  Value = c(last_values_original, pred_boot_UNH$mean),
+  Type = c(rep("Observado", 12), rep("Predicción", 3)),
+  Lower = c(rep(NA, 12), pred_boot_UNH$lower),
+  Upper = c(rep(NA, 12), pred_boot_UNH$upper)
+)
+
+ggplot(plot_data_original, aes(x = Time, y = Value, color = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Observado"), 
+            linewidth = 0.8, alpha = 0.8) +
+  geom_point(size = 3, aes(shape = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Predicción"), 
+            linewidth = 1, linetype = "dashed") +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), 
+              fill = "steelblue", alpha = 0.2) +
+  geom_point(data = subset(plot_data_original, Type == "Predicción"), 
+             size = 4, shape = 18) +
+  labs(title = "Predicción a 3 pasos - ARIMA(5,1,4) para UNH",
+       subtitle = "Intervalos predictivos al 95% obtenidos por bootstrap",
+       x = "Pasos Temporales",
+       y = "Valor de UNH",
+       color = "",
+       shape = "") +
+  scale_x_continuous(breaks = time_points,
+                     labels = c(paste0("t-", 11:1), "t", "t+1", "t+2", "t+3")) +
+  scale_color_manual(values = c("Observado" = "darkblue", "Predicción" = "red")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+
+#POINTFORECAST 
+point_forecast_UNH_1<-pred_boot_UNH$mean[1]
+point_forecast_UNH_2<-pred_boot_UNH$mean[2]
+point_forecast_UNH_3<-pred_boot_UNH$mean[3]
+
+
+#INTERVALFORECAST MORTALIDAD
+
+pred_boot_UNH_nl<- unlist(pred_boot_UNH)
+interval_UNH<-quantile(pred_boot_UNH_nl,c(0.025,0.975))
+
+
+#DENSITY FORECAST MORTALIDAD
+density_UNH<- density(pred_boot_UNH_nl)
+plot(density_UNH)
+
+
+#VaR
+VaR_UNH<- quantile(pred_boot_UNH_nl,0.01)
+VaR_UNH
+
+#TvAR coste
+TvAR_UNH<- mean(pred_boot_UNH_nl[pred_boot_UNH_nl<VaR_UNH])
+TvAR_UNH
+
+#ECONOMIC CAPITAL
+
+economic_capital_UNH<- mean(pred_boot_UNH_nl)-VaR_UNH 
+economic_capital_UNH
+#IDCBY
+
+
+#FASE 1.1 IDENTIFICAMOS ESTACIONARIEDAD EN MEDIA
+
+ggAcf(IDCBY)
+
+
+#Dickey-Fuller
+adftest_IDCBY<-adf.test(IDCBY) #HO->No Estacionariedad
+#KPSS
+kpss_IDCBY<-kpss.test(IDCBY,null = "Level") #HO-> Estacionariedad
+#PP
+pp_IDCBY<-pp.test(IDCBY) #H0->No Estacionariedad
+
+IDCBY_diff1<- diff(IDCBY)
+
+#Dickey-Fuller
+adftest_IDCBY_diff1_diff1<-adf.test(IDCBY_diff1) #HO->No Estacionariedad
+#KPSS
+kpss_IDCBY_diff1_diff1<-kpss.test(IDCBY_diff1,null = "Level") #HO-> Estacionariedad
+#PP
+pp_IDCBY_diff1_diff1<-pp.test(IDCBY_diff1) #H0->No Estacionariedad
+
+#SE TOMA 1 DIFERENCIA PARA HACER ESTACIONARIA EN MEDIA
+
+#ANALIZAMOS ESTACIONARIEDAD EN VARIANZA
+
+particion_IDCBY_diff1 <- floor(length(IDCBY_diff1)/2)
+IDCBY_diff1_1 <- IDCBY_diff1[1:particion_IDCBY_diff1]
+IDCBY_diff1_2 <- IDCBY_diff1[(particion_IDCBY_diff1+ 1):length(IDCBY_diff1)]
+
+var1_IDCBY_diff1<-var(IDCBY_diff1_1)
+var2_IDCBY_diff1<-var(IDCBY_diff1_2)
+
+RatioF_IDCBY_diff1<- max(var1_IDCBY_diff1, var2_IDCBY_diff1)/min(var1_IDCBY_diff1, var2_IDCBY_diff1)
+
+df1_IDCBY_diff1 <- length(IDCBY_diff1_1) - 1
+df2_IDCBY_diff1 <- length(IDCBY_diff1_2) - 1
+p_value_VARI_IDCBY_diff1 <- 1 - pf(RatioF_IDCBY_diff1, df1_IDCBY_diff1, df2_IDCBY_diff1) # no rechazamos la HO
+
+
+
+#FASE 1.2 ENCONTRAR EL ORDEN AR Y MA
+
+ggAcf(IDCBY_diff1)
+ggPacf(IDCBY_diff1)
+
+
+fitIDCBY_1 <- Arima(IDCBY, c(2,1,1))
+fitIDCBY_2 <- Arima(IDCBY, c(2,1,0))
+fitIDCBY_3 <- Arima(IDCBY, c(1,1,2))
+fitIDCBY_4 <- Arima(IDCBY, c(1,1,1))
+fitIDCBY_5 <- Arima(IDCBY, c(1,1,0))
+fitIDCBY_6 <- Arima(IDCBY, c(1,1,3))
+fitIDCBY_7 <- Arima(IDCBY, c(2,1,2), method="ML")
+fitIDCBY_8 <- Arima(IDCBY, c(3,1,2))
+fitIDCBY_9<-Arima(IDCBY, c(4,1,2))
+fitIDCBY_10<-Arima(IDCBY, c(4,1,3))
+fitIDCBY_11<-Arima(IDCBY, c(3,1,3))
+
+
+summary(fitIDCBY_1) 
+summary(fitIDCBY_2) 
+summary(fitIDCBY_3) 
+summary(fitIDCBY_4) 
+summary(fitIDCBY_5)
+summary(fitIDCBY_6) 
+
+# Calculamos el menor BIC
+min(fitIDCBY_1$bic, fitIDCBY_2$bic, fitIDCBY_3$bic, fitIDCBY_4$bic, fitIDCBY_5$bic, 
+    fitIDCBY_6$bic, fitIDCBY_7$bic, fitIDCBY_8$bic, fitIDCBY_9$bic, fitIDCBY_10$bic,
+    fitIDCBY_11$bic)
+
+bics_idcby <- c(fitIDCBY_1$bic, fitIDCBY_2$bic, fitIDCBY_3$bic, fitIDCBY_4$bic, fitIDCBY_5$bic, 
+                fitIDCBY_6$bic, fitIDCBY_7$bic, fitIDCBY_8$bic, fitIDCBY_9$bic, fitIDCBY_10$bic,
+                fitIDCBY_11$bic)
+
+idcby_bic <- which.min(bics_idcby)
+idcby_bic
+
+# Calculamos el menor AIC
+min(fitIDCBY_1$aic, fitIDCBY_2$aic, fitIDCBY_3$aic, fitIDCBY_4$aic, fitIDCBY_5$aic, 
+    fitIDCBY_6$aic, fitIDCBY_7$aic, fitIDCBY_8$aic, fitIDCBY_9$aic, fitIDCBY_10$aic,
+    fitIDCBY_11$aic)
+
+aics_idcby <- c(fitIDCBY_1$aic, fitIDCBY_2$aic, fitIDCBY_3$aic, fitIDCBY_4$aic, fitIDCBY_5$aic, 
+                fitIDCBY_6$aic, fitIDCBY_7$aic, fitIDCBY_8$aic, fitIDCBY_9$aic, fitIDCBY_10$aic,
+                fitIDCBY_11$aic)
+
+idcby_aic <- which.min(aics_idcby)
+idcby_aic
+
+# Calculamos el menor AIC corregido
+min(fitIDCBY_1$aicc, fitIDCBY_2$aicc, fitIDCBY_3$aicc, fitIDCBY_4$aicc, fitIDCBY_5$aicc, 
+    fitIDCBY_6$aicc, fitIDCBY_7$aicc, fitIDCBY_8$aicc, fitIDCBY_9$aicc, fitIDCBY_10$aicc,
+    fitIDCBY_11$aicc)
+
+aiccs_idcby <- c(fitIDCBY_1$aicc, fitIDCBY_2$aicc, fitIDCBY_3$aicc, fitIDCBY_4$aicc, fitIDCBY_5$aicc, 
+                 fitIDCBY_6$aicc, fitIDCBY_7$aicc, fitIDCBY_8$aicc, fitIDCBY_9$aicc, fitIDCBY_10$aicc,
+                 fitIDCBY_11$aicc)
+
+idcby_aicc <- which.min(aiccs_idcby)
+idcby_aicc
+
+# Calculamos el menor RMSE
+modelos_idcby <- list(fitIDCBY_1, fitIDCBY_2, fitIDCBY_3, fitIDCBY_4, fitIDCBY_5, 
+                      fitIDCBY_6, fitIDCBY_7, fitIDCBY_8, fitIDCBY_9, fitIDCBY_10,
+                      fitIDCBY_11)
+
+rmse_vals_idcby <- sapply(modelos_idcby, function(modelo) accuracy(modelo)[1, "RMSE"])
+
+idcby_rmse <- which.min(rmse_vals_idcby)
+idcby_rmse
+
+#ESTIMACIÓN DE PARÁMETROS
+
+coefis_IDCBY<-fitIDCBY_7$coef
+seIDCBY <- sqrt(diag(fitIDCBY_7$var.coef))
+testT_IDCBY<- coefis_IDCBY/seIDCBY
+
+interT_IDCBY<- c()
+for (i in 1:length(testT_IDCBY)) {
+  if (abs(testT_IDCBY[i])>1.96) {
+    interT_IDCBY[i]<- "S"  #S --> SIGNIFICATIVO
+  } else {
+    interT_IDCBY[i]<-"NS" #NS --> NO SIGNIFICATIVO
+  }
+}
+names(interT_IDCBY)<-c("ar1","ar2","ma1","ma2")
+interT_IDCBY
+
+
+#FASE DE DIAGNÓSIS
+checkresiduals(fitIDCBY_7)  #PREELIMINAR
+res_IDCBY_5 <- residuals(fitIDCBY_7)
+
+#CORRELACIÓN DE LOS RESIDUOS
+
+Box.test(res_IDCBY_5 , lag = sqrt(length(diff(IDCBY))), type = c("Ljung-Box")) #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR INCORRELACIÓN RESIDUOS
+
+#NORMALIDAD DE LOS RESIDUOS
+
+cvm.test(res_IDCBY_5,"pnorm",0,sd(res_IDCBY_5),estimated = TRUE)
+ad.test(res_IDCBY_5,"pnorm",0,sd(res_IDCBY_5),estimated = TRUE)
+jarque.bera.test(res_IDCBY_5) #EN CVM Y AD NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR LA NORMALIDAD DE LOS RESIDUOS. JARQUE-BERA DA PROBLEMAS (SABEMOS QUE ESTE TEST TIENE PROBLEMAS)
+
+#MEDIA 0
+qnorm(c(0.025,0.975),0,sd(res_IDCBY_5)/sqrt(length(res_IDCBY_5)))
+mean(res_IDCBY_5)  #NO TENEMOS EVIDENCIA SUFICIENTE PARA RECHAZAR QUE LA MEDIA DE LOS RESIDUOS SEA 0
+
+#HOMOCEDASTICIDAD
+y_IDCBY <- res_IDCBY_5^2  
+
+fitted_valsIDCBY <- fitted(fitIDCBY_7)
+
+df_IDCBY <- data.frame(
+  y_IDCBY = y_IDCBY,
+  fitted_valsIDCBY = fitted_valsIDCBY
+)
+
+df_IDCBY<- df_IDCBY[complete.cases(df_IDCBY), ]
+
+
+fitaux_IDCBY<-lm(y_IDCBY ~fitted_valsIDCBY)
+dfreedom_IDCBY<-4
+bp.statistic_IDCBY<-(length(y_IDCBY)-dfreedom_IDCBY)*summary(fitaux_IDCBY)$r.squared
+bp.pvalue_IDCBY<-1-pchisq(bp.statistic_IDCBY,dfreedom_IDCBY)
+
+#PREDICCION POR BOOTSTRAP
+
+fit_IDCBY <- Arima(IDCBY, c(2,1,2))
+res_IDCBY <- residuals(fitIDCBY_7)
+
+predict_arima_bootstrap_nolog <- function(model, residuals, original_series, n_bootstrap = 1000, h = 3) {
+  # Extraer coeficientes AR y MA
+  phi <- coef(model)[grep("^ar", names(coef(model)))]
+  theta <- coef(model)[grep("^ma", names(coef(model)))]
+  
+  p <- length(phi)
+  q <- length(theta)
+  
+  y <- original_series
+  T <- length(y)
+  
+  # Calcular diferencias simples (ya sin log)
+  dy_init <- diff(y)
+  
+  # Matriz para almacenar simulaciones
+  boots <- matrix(NA, nrow = n_bootstrap, ncol = h)
+  
+  for (i in 1:n_bootstrap) {
+    # Residuos bootstrap con relleno al inicio
+    eps_star <- c(rep(0, q), sample(residuals, size = h, replace = TRUE))  # longitud = q + h
+    
+    # Inicializar diferencia con relleno
+    dy_star <- c(tail(dy_init, p), rep(NA, h))  # longitud = p + h
+    
+    # Simular diferencias futuras
+    for (t in 1:h) {
+      ar_part <- if (p > 0) sum(phi * rev(dy_star[(t):(t + p - 1)])) else 0
+      ma_part <- if (q > 0) sum(theta * rev(eps_star[(t):(t + q - 1)])) else 0
+      
+      dy_star[p + t] <- ar_part + eps_star[q + t] + ma_part
+    }
+    
+    # Reconstruir serie desde el último valor
+    last_y <- y[T]
+    future_y <- cumsum(dy_star[(p + 1):(p + h)]) + last_y
+    
+    boots[i, ] <- future_y
+  }
+  
+  # Eliminar simulaciones erróneas
+  boots <- boots[complete.cases(boots), ]
+  
+  # Calcular resumen estadístico
+  pred_mean <- colMeans(boots)
+  pred_median <- apply(boots, 2, median)
+  pred_lower <- apply(boots, 2, quantile, probs = 0.025)
+  pred_upper <- apply(boots, 2, quantile, probs = 0.975)
+  
+  list(
+    mean = pred_mean,
+    median = pred_median,
+    lower = pred_lower,
+    upper = pred_upper,
+    simulations = boots
+  )
+}
+
+pred_boot_IDCBY <- predict_arima_bootstrap_nolog(
+  model = fit_IDCBY,
+  residuals = res_IDCBY,
+  original_series = IDCBY,
+  n_bootstrap = 1000,
+  h = 3
+)
+
+
+print(pred_boot_IDCBY$mean)
+
+
+
+last_values_original <- tail(IDCBY, 12)
+time_points <- c(seq(-11, 0), 1:3)
+
+plot_data_original <- data.frame(
+  Time = time_points,
+  Value = c(last_values_original, pred_boot_IDCBY$mean),
+  Type = c(rep("Observado", 12), rep("Predicción", 3)),
+  Lower = c(rep(NA, 12), pred_boot_IDCBY$lower),
+  Upper = c(rep(NA, 12), pred_boot_IDCBY$upper)
+)
+
+ggplot(plot_data_original, aes(x = Time, y = Value, color = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Observado"), 
+            linewidth = 0.8, alpha = 0.8) +
+  geom_point(size = 3, aes(shape = Type)) +
+  geom_line(data = subset(plot_data_original, Type == "Predicción"), 
+            linewidth = 1, linetype = "dashed") +
+  geom_ribbon(aes(ymin = Lower, ymax = Upper), 
+              fill = "steelblue", alpha = 0.2) +
+  geom_point(data = subset(plot_data_original, Type == "Predicción"), 
+             size = 4, shape = 18) +
+  labs(title = "Predicción a 3 pasos - ARIMA(5,1,4) para IDCBY",
+       subtitle = "Intervalos predictivos al 95% obtenidos por bootstrap",
+       x = "Pasos Temporales",
+       y = "Valor de IDCBY",
+       color = "",
+       shape = "") +
+  scale_x_continuous(breaks = time_points,
+                     labels = c(paste0("t-", 11:1), "t", "t+1", "t+2", "t+3")) +
+  scale_color_manual(values = c("Observado" = "darkblue", "Predicción" = "red")) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.minor = element_blank()
+  )
+
+#POINTFORECAST 
+point_forecast_IDCBY_1<-pred_boot_IDCBY$mean[1]
+point_forecast_IDCBY_2<-pred_boot_IDCBY$mean[2]
+point_forecast_IDCBY_3<-pred_boot_IDCBY$mean[3]
+
+
+#INTERVALFORECAST MORTALIDAD
+
+pred_boot_IDCBY_nl<- unlist(pred_boot_IDCBY)
+interval_IDCBY<-quantile(pred_boot_IDCBY_nl,c(0.025,0.975))
+
+
+#DENSITY FORECAST MORTALIDAD
+density_IDCBY<- density(pred_boot_IDCBY_nl)
+plot(density_IDCBY)
+
+
+#VaR
+VaR_IDCBY<- quantile(pred_boot_IDCBY_nl,0.01)
+VaR_IDCBY
+
+#TvAR coste
+TvAR_IDCBY<- mean(pred_boot_IDCBY_nl[pred_boot_IDCBY_nl<VaR_IDCBY])
+TvAR_IDCBY
+
+#ECONOMIC CAPITAL
+
+economic_capital_IDCBY<- mean(pred_boot_IDCBY_nl)-VaR_IDCBY
+economic_capital_IDCBY
+
